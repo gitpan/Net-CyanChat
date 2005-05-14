@@ -1,0 +1,6 @@
+Revision history for Perl extension Net::CyanChat.
+
+0.01  Sat May 14 13:40:49 2005
+	- Initial release.
+	- Fully supports both protocols 0 and 1 of CyanChat.
+
