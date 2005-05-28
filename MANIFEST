@@ -3,6 +3,7 @@ Makefile.PL
 MANIFEST
 README
 test.pl
+server.pl
 license.txt
 t/Net-CyanChat.t
 lib/Net/CyanChat.pm

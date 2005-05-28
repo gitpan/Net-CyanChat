@@ -534,6 +534,8 @@ Version 0.01
 
 =head1 SEE ALSO
 
+Net::CyanChat::Server
+
 CyanChat Protocol Documentation: http://cho.cyan.com/chat/programmers.html
 
 =head1 AUTHOR

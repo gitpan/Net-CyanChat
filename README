@@ -19,6 +19,11 @@ This module requires these other modules and libraries:
   IO::Socket
   IO::Select
 
+EXAMPLES
+
+test.pl   tests a connection to CyanChat server at cho.cyan.com:1812
+server.pl is an example code for running a CyanChat server.
+
 COPYRIGHT AND LICENCE
 
     Net::CyanChat - Perl interface to CyanChat.
