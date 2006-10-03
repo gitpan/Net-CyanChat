@@ -5,7 +5,7 @@ use warnings;
 use IO::Socket;
 use IO::Select;
 
-our $VERSION = '0.01';
+our $VERSION = '0.03';
 
 sub new {
 	my $proto = shift;
@@ -53,6 +53,7 @@ sub send {
 
 	# Send the data.
 	if (defined $self->{sock}) {
+		print ">>> $data\n";
 		$self->{sock}->send ("$data\n");
 	}
 	else {
@@ -195,7 +196,7 @@ sub do_one_loop {
 	my ($self) = @_;
 
 	# Loop with the server.
-	my @ready = $self->{select}->can_read(.1);
+	my @ready = $self->{select}->can_read(.001);
 	return unless(@ready);
 
 	foreach my $socket (@ready) {
@@ -206,6 +207,8 @@ sub do_one_loop {
 		# The server has sent us a message!
 		foreach my $said (@in) {
 			my ($command,@args) = split(/\|/, $said);
+
+			print "<<< $said\n";
 
 			# Go through the commands.
 			if ($command == 10) {
@@ -219,7 +222,7 @@ sub do_one_loop {
 			elsif ($command == 21) {
 				# 21 = Private Message
 				my $type = 0;
-				my $level = $args[0] =~ /^(\d)/;
+				my ($level) = $args[0] =~ /^(\d)/;
 				$type = $args[1] =~ /^\^(\d)/;
 				$args[0] =~ s/^(\d)//ig;
 				$args[1] =~ s/^\^(\d)//ig;
@@ -236,7 +239,7 @@ sub do_one_loop {
 			elsif ($command == 31) {
 				# 31 = Public Message.
 				my $type = 1;
-				my $level = $args[0] =~ /^(\d)/;
+				my ($level) = $args[0] =~ /^(\d)/;
 				$type = $args[1] =~ /^\^(\d)/;
 				$args[0] =~ s/^(\d)//i;
 				$args[1] =~ s/^\^(\d)//i;
@@ -272,7 +275,7 @@ sub do_one_loop {
 					my $fullNick = $nick;
 
 					# Get data about this user.
-					my $level = $nick =~ /^(\d)/;
+					my ($level) = $nick =~ /^(\d)/;
 					$nick =~ s/^(\d)//i;
 
 					# User is online.
@@ -304,6 +307,7 @@ sub do_one_loop {
 				}
 			}
 			elsif ($command == 40) {
+				print "^^^ got 40 ($args[0])\n";
 				# 40 = Server welcome message (the "pong" of 40 from the client).
 				$self->_event ('Welcome', $args[0]);
 			}
@@ -526,6 +530,10 @@ Auth levels (received as LEVEL to most handlers, or prefixed onto a user's FullN
   Any other number is probably a client error message (and is in red)
 
 =head1 CHANGE LOG
+
+Version 0.03
+  - Bug fix: the $level received to most handlers used to be 1 (cyan staff) even
+    though it should've been 0 (or any other number), so this has been fixed.
 
 Version 0.01
 

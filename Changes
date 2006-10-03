@@ -1,5 +1,8 @@
 Revision history for Perl extension Net::CyanChat.
 
+0.03  Sun Oct  1 12:00:00 2006
+	- Minor bug fixes in Net::CyanChat.
+
 0.02  Sat May 28 11:54:40 2005
 	- Added Net::CyanChat::Server for running a CyanChat server.
 
