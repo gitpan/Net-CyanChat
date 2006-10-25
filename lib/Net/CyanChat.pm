@@ -5,25 +5,28 @@ use warnings;
 use IO::Socket;
 use IO::Select;
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 sub new {
 	my $proto = shift;
 	my $class = ref($proto) || $proto;
 
 	my $self = {
-		host      => 'cho.cyan.com',
-		port      => 1812,
-		debug     => 0,
-		proto     => 1,
-		sock      => undef,
-		select    => undef,
-		nickname  => '',
-		handlers  => {},
-		connected => 0,
-		who       => {},
-		ignored   => {},
-		nicks     => {},
+		host      => 'cho.cyan.com', # Default CC Host
+		port      => 1812,           # Default CC Port (1813=debugging)
+		debug     => 0,              # Debug Mode
+		proto     => 1,              # Use Protocol 1 (not 0)
+		sock      => undef,          # Socket Object
+		select    => undef,          # Select Object
+		pinged    => 0,              # Last Ping Time
+		refresh   => 60,             # Ping Rate = 60 Seconds
+		nickname  => '',             # Our Nickname
+		handlers  => {},             # Handlers
+		connected => 0,              # Are We Connected?
+		accepted  => 0,              # Logged in?
+		who       => {},             # Who List
+		ignored   => {},             # Ignored List
+		nicks     => {},             # Nickname Lookup Table
 		@_,
 	};
 
@@ -54,7 +57,18 @@ sub send {
 	# Send the data.
 	if (defined $self->{sock}) {
 		print ">>> $data\n";
-		$self->{sock}->send ("$data\n");
+		$self->{sock}->send ("$data\n") or do {
+			# We've been disconnected!
+			$self->{sock}->close();
+			$self->{sock} = undef;
+			$self->{select} = undef;
+			$self->{connected} = 0;
+			$self->{nick} = '';
+			$self->{pinged} = 0;
+			$self->{who} = {};
+			$self->{nicks} = {};
+			$self->_event ('Disconnected');
+		};
 	}
 	else {
 		warn "Could not send \"$data\" to CyanChat: connection not established!";
@@ -80,7 +94,7 @@ sub connect {
 
 	# Error?
 	if (!defined $self->{sock}) {
-		die "Connection Error: $!";
+		$self->_event ('Error', "00|Connection Error", "Net::CyanChat Connection Error: $!");
 	}
 
 	# Create a select object.
@@ -113,6 +127,7 @@ sub logout {
 
 	return 0 unless length $self->{nickname} > 0;
 	$self->{nickname} = '';
+	$self->{accepted} = 0;
 	$self->send ("15");
 	return 1;
 }
@@ -195,6 +210,24 @@ sub _event {
 sub do_one_loop {
 	my ($self) = @_;
 
+	# Time to ping again?
+	if ($self->{pinged} > 0) {
+		# If connected...
+		if ($self->{connected} == 1) {
+			# If logged in...
+			if ($self->{accepted} == 1) {
+				# If refresh time has passed...
+				if (time() - $self->{pinged} >= $self->{refresh}) {
+					# To ping, send a private message to nobody.
+					$self->send ("20||^1ping");
+					$self->{pinged} = time();
+				}
+			}
+		}
+	}
+
+	return unless defined $self->{select};
+
 	# Loop with the server.
 	my @ready = $self->{select}->can_read(.001);
 	return unless(@ready);
@@ -217,6 +250,7 @@ sub do_one_loop {
 			}
 			elsif ($command == 11) {
 				# 11 = Name accepted.
+				$self->{accepted} = 1;
 				$self->_event ('Name_Accepted');
 			}
 			elsif ($command == 21) {
@@ -233,14 +267,17 @@ sub do_one_loop {
 				# Skip ignored users.
 				next if exists $self->{ignored}->{$nick};
 
+				shift (@args);
+				my $text = join ('|',@args);
+
 				# Call the event.
-				$self->_event ('Private', $nick, $level, $addr, $args[1]);
+				$self->_event ('Private', $nick, $level, $addr, $text);
 			}
 			elsif ($command == 31) {
 				# 31 = Public Message.
 				my $type = 1;
 				my ($level) = $args[0] =~ /^(\d)/;
-				$type = $args[1] =~ /^\^(\d)/;
+				($type) = $args[1] =~ /^\^(\d)/;
 				$args[0] =~ s/^(\d)//i;
 				$args[1] =~ s/^\^(\d)//i;
 
@@ -253,18 +290,22 @@ sub do_one_loop {
 				# Chop off spaces.
 				$args[1] =~ s/^\s//ig;
 
+				# Shift off data.
+				shift (@args); # nickname
+				my $text = join ('|',@args);
+
 				# User has entered the room.
-				if ($args[1] =~ /<links in from/i) {
+				if ($type == 2) {
 					# Call the event.
-					$self->_event ('Chat_Buddy_In', $nick, $level, $addr, $args[1]);
+					$self->_event ('Chat_Buddy_In', $nick, $level, $addr, $text);
 				}
-				elsif ($args[1] =~ /<mistakenly used an unsafe linking book/i || $args[1] =~ /<links safely back/i) {
+				elsif ($type == 3) {
 					# Call the event.
-					$self->_event ('Chat_Buddy_Out', $nick, $level, $addr, $args[1]);
+					$self->_event ('Chat_Buddy_Out', $nick, $level, $addr, $text);
 				}
 				else {
 					# Normal message.
-					$self->_event ('Message', $nick, $level, $addr, $args[1]);
+					$self->_event ('Message', $nick, $level, $addr, $text);
 				}
 			}
 			elsif ($command == 35) {
@@ -304,6 +345,9 @@ sub do_one_loop {
 
 					# The server is ready for us now.
 					$self->_event ('Connected');
+
+					# Start the pinging process.
+					$self->{pinged} = time();
 				}
 			}
 			elsif ($command == 40) {
@@ -345,9 +389,10 @@ Net::CyanChat - Perl interface for connecting to Cyan Worlds' chat room.
   use Net::CyanChat;
   
   my $cyan = new Net::CyanChat (
-        host  => 'cho.cyan.com', # default
-        port  => 1812,           # main port--1813 is for testing
-        proto => 1,              # use protocol 1.0
+        host    => 'cho.cyan.com', # default
+        port    => 1812,           # main port--1813 is for testing
+        proto   => 1,              # use protocol 1.0
+        refresh => 60,             # ping rate (default)
   );
 
   # Set up handlers.
@@ -373,7 +418,7 @@ is strongly advised against.
 
 Constructor for a new CyanChat object. Pass in any arguments you need. Some standard arguments
 are: host (defaults to cho.cyan.com), port (defaults to 1812), proto (protocol version--0 or 1--defaults
-to 1), debug, etc.
+to 1), debug, or refresh.
 
 Returns a CyanChat object.
 
@@ -462,6 +507,10 @@ Returns the currently signed in nickname of the CyanChat object.
 Called when a connection has been established, and the server recognizes your client's
 presence. At this point, you can call CYANCHAT->login (NICK) to log into the chat room.
 
+=head2 Disconnected (CYANCHAT)
+
+Called when a disconnect has been detected.
+
 =head2 Welcome (CYANCHAT, MESSAGE)
 
 Called after the server recognizes your client (almost simultaneously to Connected).
@@ -530,6 +579,14 @@ Auth levels (received as LEVEL to most handlers, or prefixed onto a user's FullN
   Any other number is probably a client error message (and is in red)
 
 =head1 CHANGE LOG
+
+Version 0.04
+  - The enter/exit chat messages now go by the tag number (like it's supposed to),
+    not by the contained text.
+  - Messages can contain pipes in them and be read okay through the module.
+  - Added a "ping" function. Apparently Cho will disconnect clients who don't do
+    anything in 5 minutes. The "ping" function also helps detect disconnects!
+  - The Disconnected handler has been added to detect disconnects.
 
 Version 0.03
   - Bug fix: the $level received to most handlers used to be 1 (cyan staff) even
