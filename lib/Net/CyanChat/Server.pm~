@@ -536,7 +536,7 @@ Casey Kirsle <casey at cuvou.net>
 =head1 COPYRIGHT AND LICENSE
 
     Net::CyanChat - Perl interface to CyanChat.
-    Copyright (C) 2007  Casey Kirsle
+    Copyright (C) 2005  Casey Kirsle
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
