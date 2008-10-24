@@ -1,11 +1,17 @@
 package Net::CyanChat::Server;
 
+#------------------------------------------------------------------------------#
+# Net::CyanChat - Perl interface for connecting to Cyan Worlds' chat room.     #
+#------------------------------------------------------------------------------#
+# POD documentation is at the very end of this source code.                    #
+#------------------------------------------------------------------------------#
+
 use strict;
 use warnings;
 use IO::Socket;
 use IO::Select;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 sub new {
 	my $proto = shift;
@@ -61,6 +67,7 @@ sub connect {
 
 	# Create a select object.
 	$self->{select} = IO::Select->new ($self->{sock});
+	return 1;
 }
 
 sub start {
@@ -68,6 +75,7 @@ sub start {
 	while (1) {
 		$self->do_one_loop();
 	}
+	return undef;
 }
 
 sub reply {
@@ -445,13 +453,13 @@ Returns a CyanChat server object.
 
 Returns the version number.
 
-=head2 debug (MESSAGE)
+=head2 debug ($MESSAGE)
 
 Called by the module itself for debug messages.
 
 =head2 connect
 
-Connect to CyanChat's server.
+Open the server socket and listen for connections.
 
 =head2 start
 
@@ -459,9 +467,10 @@ Start a loop of do_one_loop's.
 
 =head2 do_one_loop
 
-Perform a single loop on the server.
+Perform a single loop of checking for new connections and events from existing
+connections.
 
-=head2 setWelcome (MESSAGE_1, MESSAGE_2, ETC)
+=head2 setWelcome (@MESSAGES)
 
 Set the Welcome Messages that are displayed when a user connects to the chat. The default messages are:
 
@@ -474,28 +483,32 @@ Set the Welcome Messages that are displayed when a user connects to the chat. Th
   
   Termination of use can happen without warning!
 
-=head2 setPassword (PASS)
+=head2 setPassword ($PASS)
 
 Define the password that is required to authenticate as a staff member. A
-client would use this password by sending the command...
+client would use this password by sending the command below before logging in
+to the chat room:
 
   50|password
 
-Before signing in to the chat.
+Note that this part of the protocol support is not official. The administrative
+commands in the CyanChat protocol is not public knowledge and so this support
+was just speculated on based on the gaps in the protocol documentation. This
+probably only works with clients using the Net::CyanChat module.
 
 =head2 url
 
 Returns the host/port to your CyanChat server (i.e. "localhost:1812")
 
-=head2 reply (SOCKET, DATA)
+=head2 reply ($SOCKET, $DATA)
 
-Send data to the specified SOCKET.
+Send data to the specified SOCKET object.
 
-=head2 getSocket (USERNAME)
+=head2 getSocket ($USERNAME)
 
 Get the socket of a username signed into the chat room.
 
-=head2 broadcast (DATA)
+=head2 broadcast ($DATA)
 
 Broadcasts commands to all logged-in users.
 
@@ -505,6 +518,10 @@ Sends the Who List to all users. This should be called when a user joins or exit
 room.
 
 =head1 CHANGE LOG
+
+Version 0.03
+
+  - Cleaned up the documentation a bit.
 
 Version 0.02
 
@@ -518,7 +535,6 @@ Version 0.01
 
 =head1 TO DO
 
-  - Add support for administrators ("Cyan Staff") to join the room.
   - Add support for built in profanity filters and bans.
   - Add IP encryption algorythm similar to Cyan's.
   - Display user's ISP as their home Age, rather than their IP address.
@@ -531,7 +547,7 @@ CyanChat Protocol Documentation: http://cho.cyan.com/chat/programmers.html
 
 =head1 AUTHOR
 
-Casey Kirsle <casey at cuvou.net>
+Casey Kirsle, http://www.cuvou.com/
 
 =head1 COPYRIGHT AND LICENSE
 

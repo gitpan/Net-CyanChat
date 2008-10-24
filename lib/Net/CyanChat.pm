@@ -1,11 +1,17 @@
 package Net::CyanChat;
 
+#------------------------------------------------------------------------------#
+# Net::CyanChat - Perl interface for connecting to Cyan Worlds' chat room.     #
+#------------------------------------------------------------------------------#
+# POD documentation is at the very end of this source code.                    #
+#------------------------------------------------------------------------------#
+
 use strict;
 use warnings;
 use IO::Socket;
 use IO::Select;
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 sub new {
 	my $proto = shift;
@@ -25,6 +31,7 @@ sub new {
 		connected => 0,              # Are We Connected?
 		accepted  => 0,              # Logged in?
 		who       => {},             # Who List
+		special   => {},             # Special who List
 		ignored   => {},             # Ignored List
 		nicks     => {},             # Nickname Lookup Table
 		@_,
@@ -56,7 +63,7 @@ sub send {
 
 	# Send the data.
 	if (defined $self->{sock}) {
-		print ">>> $data\n";
+		$self->debug (">>> $data\n");
 
 		# Send true CrLf
 		$self->{sock}->send ("$data\x0d\x0a") or do {
@@ -97,10 +104,12 @@ sub connect {
 	# Error?
 	if (!defined $self->{sock}) {
 		$self->_event ('Error', "00|Connection Error", "Net::CyanChat Connection Error: $!");
+		return undef;
 	}
 
 	# Create a select object.
 	$self->{select} = IO::Select->new ($self->{sock});
+	return 1;
 }
 
 sub start {
@@ -109,10 +118,15 @@ sub start {
 	while (1) {
 		$self->do_one_loop or last;
 	}
+
+	return undef;
 }
 
 sub login {
 	my ($self,$nick) = @_;
+
+	# Remove newline characters.
+	$nick =~ s/[\x0d\x0a]//ig;
 
 	if (length $nick > 0) {
 		# Sign in.
@@ -121,13 +135,13 @@ sub login {
 		return 1;
 	}
 
-	return 0;
+	return undef;
 }
 
 sub logout {
 	my ($self) = @_;
 
-	return 0 unless length $self->{nickname} > 0;
+	return undef unless length $self->{nickname} > 0;
 	$self->{nickname} = '';
 	$self->{accepted} = 0;
 	$self->send ("15");
@@ -137,41 +151,65 @@ sub logout {
 sub sendMessage {
 	my ($self,$msg) = @_;
 
+	# Remove newline characters.
+	$msg =~ s/[\x0d\x0a]//ig;
+
 	# Send the message.
-	return 0 unless length $msg > 0;
+	return undef unless length $msg > 0;
 	$self->send ("30|^1$msg");
+	return 1;
 }
 
 sub sendPrivate {
 	my ($self,$to,$msg) = @_;
 
-	return unless (length $to > 0 && length $msg > 0);
+	# Remove newline characters.
+	$to  =~ s/[\x0d\x0a]//ig;
+	$msg =~ s/[\x0d\x0a]//ig;
+
+	return undef unless (length $to > 0 && length $msg > 0);
 	# Get the user's full nick.
 	my $nick = $self->{nicks}->{$to};
 
 	# Send this user a message.
 	$self->send ("20|$nick|^1$msg");
+	return 1;
 }
 
 sub getBuddies {
 	my ($self) = @_;
 
 	# Return the buddylist.
-	return $self->{who};
+	my $buddies = {};
+	foreach my $key (keys %{$self->{who}}) {
+		$buddies->{who}->{$key} = $self->{who}->{$key};
+	}
+	foreach my $key (keys %{$self->{special}}) {
+		$buddies->{special}->{$key} = $self->{special}->{$key};
+	}
+	return $buddies;
 }
 
-sub getFullName {
+sub getUsername {
 	my ($self,$who) = @_;
 
 	# Return this user's full name.
-	return $self->{full}->{$who} or 0;
+	return $self->{nicks}->{who}->{$who} || $self->{nicks}->{special}->{$who} || undef;
+}
+sub getFullName {
+	my ($self,$who) = @_;
+
+	# Alias for getUsername.
+	return $self->getUsername ($who);
 }
 
 sub getAddress {
 	my ($self,$who) = @_;
 
 	# Return this user's address.
-	return $self->{who}->{$who} or 0;
+	return $self->{who}->{$who} || (
+		exists $self->{special}->{$who} ? "Cyan Worlds" : undef
+	) || undef;
 }
 
 sub protocol {
@@ -188,49 +226,65 @@ sub nick {
 sub ignore {
 	my ($self,$who) = @_;
 
+	# Remove newline characters.
+	$who =~ s/[\x0d\x0a]//ig;
+
 	# Ignore this user.
-	return unless length $who > 0;
+	return undef unless length $who > 0;
 	$self->{ignored}->{$who} = 1;
 	$self->send ("70|$who");
+	return 1;
 }
 sub unignore {
 	my ($self,$who) = @_;
 
+	# Remove newline characters.
+	$who =~ s/[\x0d\x0a]//ig;
+
 	# Unignore this user.
-	return unless length $who > 0;
+	return undef unless length $who > 0;
 	delete $self->{ignored}->{$who};
 	$self->send ("70|$who");
+	return 1;
 }
 
 sub authenticate {
 	my ($self,$password) = @_;
 
+	# Remove newline characters.
+	$password =~ s/[\x0d\x0a]//ig;
+
 	# Authenticate with a CC password.
 	$self->send ("50|$password");
+	return 1;
 }
 
 sub promote {
 	my ($self,$user) = @_;
 
+	# Remove newline characters.
+	$user =~ s/[\x0d\x0a]//ig;
+
 	# Promote this user to Special Guest.
 	$self->send ("60|$user|4");
+	return 1;
 }
 
 sub demote {
 	my ($self,$user) = @_;
 
+	# Remove newline characters.
+	$user =~ s/[\x0d\x0a]//ig;
+
 	# Demote this user.
 	$self->send ("60|$user|0");
+	return 1;
 }
 
 sub _event {
 	my ($self,$event,@data) = @_;
 
-	print "_event: $event, @data\n";
-
 	return unless exists $self->{handlers}->{$event};
-
-	print "calling event for $event\n";
 	&{$self->{handlers}->{$event}} ($self,@data);
 }
 
@@ -253,11 +307,11 @@ sub do_one_loop {
 		}
 	}
 
-	return unless defined $self->{select};
+	return undef unless defined $self->{select};
 
 	# Loop with the server.
-	my @ready = $self->{select}->can_read(.001);
-	return unless(@ready);
+	my @ready = $self->{select}->can_read(.01);
+	return 1 unless(@ready);
 
 	foreach my $socket (@ready) {
 		my $resp;
@@ -266,10 +320,10 @@ sub do_one_loop {
 
 		# The server has sent us a message!
 		foreach my $said (@in) {
-			$said =~ s/\r//ig;
+			$said =~ s/[\x0d\x0a]//ig;
 			my ($command,@args) = split(/\|/, $said);
 
-			print "<<< $said\n";
+			$self->debug("<<< $said\n");
 
 			# Go through the commands.
 			if ($command == 10) {
@@ -284,6 +338,7 @@ sub do_one_loop {
 			elsif ($command == 21) {
 				# 21 = Private Message
 				my $type = 0;
+				my $fullNick = $args[0];
 				my ($level) = $args[0] =~ /^(\d)/;
 				$type = $args[1] =~ /^\^(\d)/;
 				$args[0] =~ s/^(\d)//ig;
@@ -299,11 +354,18 @@ sub do_one_loop {
 				my $text = join ('|',@args);
 
 				# Call the event.
-				$self->_event ('Private', $nick, $level, $addr, $text);
+				$self->_event ('Private', {
+					nick     => $nick,
+					username => $fullNick,
+					level    => $level,
+					address  => $addr,
+					message  => $text,
+				});
 			}
 			elsif ($command == 31) {
 				# 31 = Public Message.
 				my $type = 1;
+				my $fullNick = $args[0];
 				my ($level) = $args[0] =~ /^(\d)/;
 				($type) = $args[1] =~ /^\^(\d)/;
 				$args[0] =~ s/^(\d)//i;
@@ -325,20 +387,45 @@ sub do_one_loop {
 				# User has entered the room.
 				if ($type == 2) {
 					# Call the event.
-					$self->_event ('Chat_Buddy_In', $nick, $level, $addr, $text);
+					$self->_event ('Chat_Buddy_In', {
+						nick     => $nick,
+						username => $fullNick,
+						level    => $level,
+						address  => $addr,
+						message  => $text,
+					});
 				}
 				elsif ($type == 3) {
 					# Call the event.
-					$self->_event ('Chat_Buddy_Out', $nick, $level, $addr, $text);
+					$self->_event ('Chat_Buddy_Out', {
+						nick     => $nick,
+						username => $fullNick,
+						level    => $level,
+						address  => $addr,
+						message  => $text,
+					});
 				}
 				else {
 					# Normal message.
-					$self->_event ('Message', $nick, $level, $addr, $text);
+					$self->_event ('Message', {
+						nick     => $nick,
+						username => $fullNick,
+						level    => $level,
+						address  => $addr,
+						message  => $text,
+					});
 				}
 			}
 			elsif ($command == 35) {
 				# 35 = Who List Update.
+
+				# Keep track of all the FullNick's we found.
 				my %this = ();
+
+				# Keep running arrays of users for the WhoList event.
+				my @list = ();
+
+				# Go through each item received.
 				foreach my $user (@args) {
 					my ($nick,$addr) = split(/\,/, $user, 2);
 					my $fullNick = $nick;
@@ -348,22 +435,42 @@ sub do_one_loop {
 					$nick =~ s/^(\d)//i;
 
 					# User is online.
-					$self->{who}->{$nick} = $addr;
-					$this{$nick} = 1;
+					if ($level == 0) {
+						# Add user to the normal users list.
+						$self->{who}->{$nick} = $addr;
+						$self->{nicks}->{who}->{$nick} = $fullNick;
+					}
+					else {
+						# Add them to the Cyan & Guests list.
+						$self->{special}->{$nick} = $addr;
+						$self->{nicks}->{special}->{$nick} = $fullNick;
+					}
 
-					# Call the event.
-					$self->{nicks}->{$nick} = $fullNick;
-					$self->_event ('Chat_Buddy_Here', $nick, $level, $addr);
+					push (@list, {
+						nick     => $nick,
+						level    => $level,
+						address  => $addr,
+						username => $fullNick,
+					});
+					$this{$fullNick} = 1;
 				}
 
 				# New event: WhoList = sends the entire Who List at once.
-				$self->_event ('WhoList', @args);
+				$self->_event ('WhoList', @list);
 
 				# See if anybody should be dropped.
 				foreach my $who (keys %{$self->{who}}) {
-					if (!exists $this{$who}) {
+					my $fullNick = $self->{nicks}->{who}->{$who};
+					if (!exists $this{$fullNick}) {
 						# Buddy's gone.
 						delete $self->{who}->{$who};
+					}
+				}
+				foreach my $who (keys %{$self->{special}}) {
+					my $fullNick = $self->{nicks}->{special}->{$who};
+					if (!exists $this{$fullNick}) {
+						# Buddy's gone.
+						delete $self->{special}->{$who};
 					}
 				}
 
@@ -382,21 +489,14 @@ sub do_one_loop {
 				}
 			}
 			elsif ($command == 40) {
-				print "^^^ got 40 ($args[0])\n";
 				# 40 = Server welcome message (the "pong" of 40 from the client).
+				$args[0] =~ s/^1//i;
 				$self->_event ('Welcome', $args[0]);
 			}
 			elsif ($command == 70) {
 				# 70 = Ignored/Unignored a user.
 				my $user = $args[0];
-				if (exists $self->{ignored}->{$user}) {
-					delete $self->{ignored}->{$user};
-					$self->_event ('Ignored', 0, $user);
-				}
-				else {
-					$self->{ignored}->{$user} = 1;
-					$self->_event ('Ignored', 1, $user);
-				}
+				$self->_event ('Ignored', $user);
 			}
 			else {
 				$self->debug ("Unknown event code from server: $command|"
@@ -439,23 +539,70 @@ chat room.
 
 =head1 NOTE TO DEVELOPERS
 
-Cyan Chat regulars really HATE bots! Recommended usage of this module is for developing
-your own client, or a silent logging bot. Auto-Shorah (greeting users who enter the room)
-is strongly advised against.
+CyanChat regulars aren't fond of having chat bots in their room. The following
+guidelines should be followed when connecting to C<cho.cyan.com> (the official
+CyanChat server):
+
+  1. Don't create a bot that sends messages publicly to the chat room.
+  2. CyanChat regulars don't like logging bots either (ones that would i.e. allow
+     users to read chat transcripts online without having to participate in the
+     chat room themselves).
+  3. Don't do auto-shorah (or, automatically greeting members as they enter the
+     chat room).
+
+C<Net::CyanChat> was created to aid in a Perl CyanChat client program. This is
+how it should stay. Use this module to program an interactive chat client, not
+a bot.
+
+=head1 VOCABULARY
+
+For the sake of this manpage, the following vocabulary will be used:
+
+  nick (or nickname):
+    This is the displayed name of the user, as would be seen in the Who List
+    and in messages they send.
+
+  username (or fullname):
+    This is the name that CyanChat refers to users internally by. It's the same
+    as the nickname but it has a number in front. See "CyanChat Auth Levels"
+    below for the meaning of the numbers.
 
 =head1 METHODS
 
 =head2 new (ARGUMENTS)
 
 Constructor for a new CyanChat object. Pass in any arguments you need. Some standard arguments
-are: host (defaults to cho.cyan.com), port (defaults to 1812), proto (protocol version--0 or 1--defaults
-to 1), debug, or refresh.
+are:
 
-Returns a CyanChat object.
+  host:    The hostname or IP of a CyanChat server.
+           Default: cho.cyan.com
+  port:    The port number that a CyanChat server is listening on.
+           Default: 1812
+           Note:    Port 1812 on cho.cyan.com is the standard official CyanChat
+                    service. This server is very strict about the protocol. Sending
+                    malformed packets will get you banned from the server.
+           Note:    Port 1813 on cho.cyan.com is the development server. The server
+                    is less strict about poorly formatted commands and won't ban your
+                    IP when such happens. There still is a profanity filter though.
+  proto:   The number of the CyanChat protocol to use (between versions 0 and 1).
+           Default: 1
+           Note:    See the CyanChat Developers link below for specifications of
+                    the protocol versions.
+  debug:   Debug mode. When active, client/server packets are displayed in your
+           terminal window (or whereever STDOUT directs to).
+  refresh: The "ping rate". The CyanChat server sometimes disconnects clients who
+           are idle for long periods of time. There is no "ping" system implemented
+           in the protocol. Many CC clients "ping" by sending an empty private
+           message to an empty nickname. The refresh rate here determines how many
+           seconds it waits between doing this.
+           Default: 60
+
+Returns a C<Net::CyanChat> object. See L<"CHO"> for tips about the official
+CyanChat server.
 
 =head2 version
 
-Returns the version number.
+Returns the version number of the module.
 
 =head2 debug (MESSAGE)
 
@@ -463,7 +610,9 @@ Called by the module itself for debug messages.
 
 =head2 send (DATA)
 
-Send raw data to the CyanChat server.
+Send raw data to the CyanChat server. This method is dangerous to be used
+manually, as the official server doesn't tolerate malformed packets.
+See L<"CHO"> for details.
 
 =head2 setHandler (EVENT_CODE => CODEREF)
 
@@ -471,46 +620,62 @@ Set up a handler for the CyanChat connection. See below for a list of handlers.
 
 =head2 connect
 
-Connect to CyanChat's server.
+Connect to the CyanChat server. Will return undef and call your C<Error>
+handler if the connection fails; otherwise returns 1.
 
 =head2 start
 
-Start a loop of do_one_loop's.
+Start a loop of do_one_loop's. Will break and return undef when a do_one_loop
+fails.
 
 =head2 do_one_loop
 
-Perform a single loop on the server.
+Perform a single loop on the server. Returns undef on error; 1 otherwise.
 
 =head2 login (NICK)
 
 After receiving a "Connected" event from the server, it is okay to log in now. NICK
-should be no more than 20 characters and cannot contain a pipe symbol "|".
+should be no more than 20 characters and cannot contain a pipe symbol "|" or
+a comma.
 
-This method can be called even after you have logged in once, for example if you want
-to change your nickname without logging out and then back in.
+Of interest, it seems that on L<"CHO"> you can call the login method more than
+once. Effectually you send another "has logged in" event under the new nick,
+without having sent a "has left" event. The server wasn't intended to behave this
+way, so your mileage may vary.
 
 =head2 logout
 
-Log out of CyanChat. Must be logged in first.
+Log out of CyanChat if you're currently logged in. B<Never> call this method
+if your object is not currently logged in. L<"CHO"> will consider it a bad
+packet and ban your IP.
 
 =head2 sendMessage (MESSAGE)
 
-Broadcast a message publicly to the chat room. Can only be called after you have logged
-in through $cyan->login.
+Broadcast a message publicly to the chat room. You must have logged in to the
+chat room before you can call this method.
 
-=head2 sendPrivate (TO, MESSAGE)
+=head2 sendPrivate (USERNAME, MESSAGE)
 
-Send a private message to recipient TO. Must be logged in first.
+Send a private message to recipient USERNAME. You must be logged in first.
 
 =head2 getBuddies
 
-Returns a hashref containing each buddy's username as the keys and their addresses as the values.
+Returns a hashref containing "who" (normal users) and "special" (Cyan & Guests).
+Under each key are keys containing the Nicknames and their Addresses as values.
+Example:
 
-=head2 getFullName (NICK)
+  {
+    who => {
+      'Kirsle' => '11923769',
+    },
+    special => {},
+  };
 
-Returns the full name of passed in NICK. If NICK is not in the room, returns 0. FullName is the
-name that CyanChat recognizes NICK by (including their auth code, i.e. "0username" for normal
-users and "1username" for Cyan staff).
+=head2 getUsername (NICK)
+
+Returns the full username of passed in NICK. If NICK is not in the room, returns undef.
+This function was historically named C<getFullName>. The old function is an alias to
+the new one.
 
 =head2 getAddress (NICK)
 
@@ -524,12 +689,16 @@ Returns the protocol version you are using. Will return 0 or 1.
 
 =head2 ignore (USER), unignore (USER)
 
-Ignore and unignore a username. When a user is ignored, the Message and Private events will not
-be called when they send a message.
+Ignore and unignore a username. This sends the "Ignore" event to the server as
+well as keeping track internally that the user is ignored. Unignoring a user
+probably doesn't work, so if your client needs to support this you should handle
+it "manually" (ex. not display messages from this user if they're ignored but
+don't actually ignore them through the CC protocol).
 
 =head2 nick
 
-Returns the currently signed in nickname of the CyanChat object.
+Returns the currently signed in nickname of the CyanChat object, or the blank
+string if not logged in.
 
 =head1 ADVANCED METHODS
 
@@ -543,21 +712,46 @@ banned from CyanChat, and calling promote() or demote() without being an admin u
 will probably have the same effect.
 
 In other words, B<don't use these methods unless you know what you're doing!>
+See L<"CHO"> for more information.
+
+B<Note that these commands aren't official.> The section of the CyanChat protocol
+dealing with administrative functionality isn't public knowledge. Instead, some
+functionality has been guessed upon based on the gaps in the protocol specification.
+
+The following functionality B<does> work when the chat server is running on the
+Net::CyanChat::Server module, but it may not work with other implementations
+of a CyanChat server, and it will most likely not work with L<"CHO">.
 
 =head2 authenticate (PASSWORD)
 
 Authenticate your connection as a Cyan Worlds staff member. Call this method before
-entering the chat room.
+entering the chat room. If approved by the server, you will log in with an
+administrative (cyan-colored) nickname.
 
 =head2 promote (USER)
 
-Promote USER to a Special Guest.
+Promote USER to a Special Guest. Special guests are typically rendered in orange
+text and appear in a special "Cyan & Guests" who list.
 
 =head2 demote (USER)
 
 Demote USER to a normal user level.
 
 =head1 HANDLERS
+
+Handlers are implemented via the C<setHandler> function. Here is an example
+handler:
+
+  $cc->setHandler (Welcome => \&on_welcome);
+
+  sub on_welcome {
+    my ($cyanchat, $message) = @_;
+    print "[ChatServer] $message\n";
+  }
+
+The handlers are listed here in the format of "HandlerName (Parameters)". All
+handlers receive a copy of the C<Net::CyanChat> object and then any additional
+parameters based on the nature of the event.
 
 =head2 Connected (CYANCHAT)
 
@@ -568,62 +762,86 @@ presence. At this point, you can call CYANCHAT->login (NICK) to log into the cha
 
 Called when a disconnect has been detected.
 
-=head2 Welcome (CYANCHAT, MESSAGE)
+=head2 Welcome (CYANCHAT, $MESSAGE)
 
 Called after the server recognizes your client (almost simultaneously to Connected).
 MESSAGE are messages that the CyanChat server sends--mostly just includes a list of the
 chat room's rules.
 
-=head2 Message (CYANCHAT, NICK, LEVEL, ADDRESS, MESSAGE)
+Note that CyanChat is different to most traditional chat rooms: new messages are
+displayed on the top of your chat history. The Welcome handler is called for each
+message, and these messages will arrive in reverse order to what you'd expect,
+since the new messages should be displayed above the previous ones. When all the
+welcome messages arrive, then it can be read from top to bottom normally.
 
-Called when a user sends a message publicly in chat. NICK is their nickname, LEVEL is their
-auth level (0 = normal, 1 = Cyan employee, etc. - see below for full list). ADDRESS is their
-chat address, and MESSAGE is their message.
+=head2 Message (CYANCHAT, \%INFO)
 
-=head2 Private (CYANCHAT, NICK, LEVEL, ADDRESS, MESSAGE)
+Called when a user sends a message publicly in chat. INFO is a hash reference
+containing the following keys:
 
-Called when a user sends a private message to your client. All the arguments are the same
-as the Message handler.
+  nick:     The user's nickname.
+  username: Their full username.
+  address:  Their encoded IP address.
+  level:    Their auth level (see "CyanChat Auth Levels" below).
+  message:  The text of their message.
 
-=head2 Ignored (CYANCHAT, IGNORE, NICK)
+Example:
 
-Called when a user has been ignored or unignored. IGNORE will be 1 (ignoring) or
-0 (unignoring). NICK is their nickname.
+  $cc->setHandler (Message => sub {
+    my ($cyan,$info) = @_;
+    print "[$info->{nick}] $info->{message}\n";
+  });
 
-=head2 Chat_Buddy_In (CYANCHAT, NICK, LEVEL, ADDRESS, MESSAGE)
+All of the following handlers have the same structure for their "INFO" parameter.
 
-Called when a buddy enters the chat room. NICK, LEVEL, and ADDRESS are the same as in the
+=head2 Private (CYANCHAT, \%INFO)
+
+Called when a user sends a private message to your client.
+
+=head2 Ignored (CYANCHAT, $USER)
+
+Called when a username has ignored us in chat. This is used in the standard chat
+client so that you can perform a mutual ignore (your client automatically ignores
+the remote user when they ignore you). The idea is that if a user is being abusive
+in chat and everybody in the room ignores them, it will appear to them as though
+everybody has left (because their client will have ignored everyone else too).
+
+=head2 Chat_Buddy_In (CYANCHAT, \%INFO)
+
+Called when a buddy enters the chat room. NICK, USERNAME, LEVEL, and ADDRESS are the same as in the
 Message and Private handlers. MESSAGE is their join message (i.e. "<links in from comcast.net age>")
 
-=head2 Chat_Buddy_Out (CYANCHAT, NICK, LEVEL, ADDRESS, MESSAGE)
+=head2 Chat_Buddy_Out (CYANCHAT, \%INFO)
 
 Called when a buddy exits. MESSAGE is their exit message (i.e. "<links safely back to their home Age>"
 for normal log out, or "<mistakenly used an unsafe Linking Book without a maintainer's suit>" for
 disconnected).
 
-=head2 Chat_Buddy_Here (CYANCHAT, NICK, LEVEL, ADDRESS)
-
-Called for each member currently in the room. Each time the Who List updates, this handler is called
-for each buddy in the room.
-
-=head2 WhoList (CYANCHAT, USERS)
+=head2 WhoList (CYANCHAT, @USERS)
 
 This handler is called whenever a "35" (WhoList) event is received from the server. USERS is an array
-of the raw user data the server sent. The array is full of elements of the format:
+of hashes containing information about all the users in the order they were received from the server.
 
-  #username,address
+Each item in the array is a hash reference with the following keys:
 
-Where # is the auth level. Unlike Chat_Buddy_Here, your program needs to loop and parse out info
-from each of the users.
+  nick:     Their nickname (ex: Kirsle)
+  username: Their username (ex: 0Kirsle)
+  address:  Their chat address
+  level:    Their auth level (ex: 0)
 
 =head2 Name_Accepted (CYANCHAT)
 
 The CyanChat server has accepted your name.
 
-=head2 Error (CYANCHAT, CODE, STRING)
+=head2 Error (CYANCHAT, $CODE, $STRING)
 
 Handles errors issued by CyanChat. CODE is the exact server code issued that caused the error.
 STRING is either an English description or the exact text the server sent.
+
+Potential errors that would come up:
+
+  00 Connection error
+  10 Your name is invalid
 
 =head1 CYAN CHAT RULES
 
@@ -635,26 +853,71 @@ The CyanChat server strictly enforces these rules:
   
   Termination of use can happen without warning!
 
+See L<"CHO"> for what exactly "Termination of use can happen without warning!" means.
+
 =head1 CYAN CHAT AUTH LEVELS
 
 Auth levels (received as LEVEL to most handlers, or prefixed onto a user's FullName) are as follows:
 
   0 is for regular chat user (should be in white)
   1 is for Cyan Worlds employee (should be in cyan)
-  2 is for CyanChat Server message (should be in green)
-  4 is for special guest (should be in gold)
-  Any other number is probably a client error message (and is in red)
+  2 is for CyanChat Server message (should be in lime green)
+  4 is for special guest (should be in gold or orange)
+  Any other number is probably a client error message (should be in red)
+
+=head1 CHO
+
+This section of the manpage provides some tips for interacting with the standard
+official CyanChat server, C<cho.cyan.com>.
+
+B<Cho is picky about the protocol.> If you send a malformed packet to Cho, it
+will most likely ban your IP address. Usually the first offense results in a
+24 hour ban. Repeat offenses last longer and longer (possibly indefinitely).
+
+B<Cho has a bad language filter.> Sending a severe swear word results in an
+instant, permanent ban. Less severe swear words result in a 24 hour ban, or a
+longer ban if it's a repeat offense.
+
+B<Cho has a development server.> C<cho.cyan.com> port C<1813> is the development
+server. The server here is tolerant of packet mistakes and will warn you about
+them instead of banning your client. However, the bad language filter still
+exists here.
 
 =head1 CHANGE LOG
 
-Version 0.05
+  Version 0.06 - Oct 24 2008
+  - Broke backwards compatibility *big time*.
+  - Removed the Chat_Buddy_Here method. It was useless and difficult to work with.
+  - All the Message handlers (Message, Private, Chat_Buddy_In, Chat_Buddy_Out)
+    now receive a hashref containing the details of the event, instead of
+    receiving them in array format.
+  - The Who Lists are now separated internally into "Who" (normal users)
+    and "Special" (Cyan & Guests). Cyanites so rarely enter the CyanChat room
+    that conflicts in nicknames between normal users and Cyanites was rare, but
+    possible, and the previous version of the module wouldn't be able to handle
+    that.
+  - The function getBuddies returns a higher level hash dividing the users into
+    the "who" and "special" categories (i.e. $ret->{who}->{Kirsle} = 11223135).
+  - All functions return undef on error now, and 1 on success (unless another
+    value is expected), instead of returning 0 on error.
+  - Removed some leftover prints in the code from the last version.
+  - Revised the POD to include some bits of example code, particularly around
+    the HANDLERS section.
+  - Added a new section to the POD to list some tips for interacting with the
+    official chat server, Cho.
+  - Cleared up some of the vocabulary in the POD, since "nicknames" and
+    "usernames" are two different beasts, and it's important to know which one
+    to use for any given method.
+  - Included a command-line CyanChat client as a demonstration of this module
+    (and to complement the `ccserver` script). The client requires Term::ReadKey
+    and, on Win32, Win32::Console::ANSI (if you want ANSI colors).
 
+  Version 0.05 - Jun  1 2007
   - Fixed the end-of-line characters, it now sends a true CrLf.
   - Added the WhoList handler.
   - Added the authenticate(), promote(), and demote() methods.
 
-Version 0.04
-
+  Version 0.04 - Oct 24 2006
   - The enter/exit chat messages now go by the tag number (like it's supposed to),
     not by the contained text.
   - Messages can contain pipes in them and be read okay through the module.
@@ -662,13 +925,11 @@ Version 0.04
     anything in 5 minutes. The "ping" function also helps detect disconnects!
   - The Disconnected handler has been added to detect disconnects.
 
-Version 0.03
-
+  Version 0.03 - Oct  1 2006
   - Bug fix: the $level received to most handlers used to be 1 (cyan staff) even
     though it should've been 0 (or any other number), so this has been fixed.
 
-Version 0.01
-
+  Version 0.01 - May 14 2005
   - Initial release.
   - Fully supports both protocols 0 and 1 of CyanChat.
 
@@ -680,7 +941,7 @@ CyanChat Protocol Documentation: http://cho.cyan.com/chat/programmers.html
 
 =head1 AUTHOR
 
-Casey Kirsle <casey at cuvou.net>
+Casey Kirsle, http://www.cuvou.com/
 
 =head1 COPYRIGHT AND LICENSE
 

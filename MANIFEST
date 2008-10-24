@@ -3,7 +3,9 @@ Makefile.PL
 MANIFEST
 README
 test.pl
-server.pl
-license.txt
+LICENSE
 t/Net-CyanChat.t
 lib/Net/CyanChat.pm
+lib/Net/CyanChat/Server.pmbin/ccserver
+bin/tcc
+META.yml                                 Module meta-data (added by MakeMaker)
